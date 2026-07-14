@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#345c38">
+  <title>Dashboard Testing</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DT</div>
+        <div>
+          <h1>Dashboard Testing</h1>
+          <p>BigQuery summary PWA</p>
+        </div>
+      </div>
+
+      <section class="control-group">
+        <div class="control-title">Data Source</div>
+        <label class="field">
+          <span>API endpoint</span>
+          <input id="apiEndpoint" type="url" placeholder="Apps Script or Cloud Run URL">
+        </label>
+        <button id="saveEndpoint" class="primary">Save endpoint</button>
+        <button id="refreshData" class="secondary">Refresh summary</button>
+      </section>
+
+      <section class="control-group">
+        <div class="control-title">Install Date</div>
+        <div class="date-grid">
+          <label class="field">
+            <span>From</span>
+            <input id="dateFrom" type="date">
+          </label>
+          <label class="field">
+            <span>To</span>
+            <input id="dateTo" type="date">
+          </label>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <div class="control-title">Channel</div>
+        <select id="channelFilter">
+          <option value="">All channels</option>
+        </select>
+      </section>
+
+      <div class="status" id="statusBox">Ready.</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <h2>User Quality</h2>
+          <p id="subtitle">Summary dashboard shell for GitHub Pages PWA deployment.</p>
+        </div>
+        <div class="install-actions">
+          <button id="installApp" class="secondary" hidden>Install app</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="active" data-tab="scorecard">Scorecard</button>
+        <button data-tab="conversion">Conversion</button>
+        <button data-tab="retention">Retention</button>
+        <button data-tab="geo">Geo</button>
+      </nav>
+
+      <section class="kpi-grid" id="kpiGrid">
+        <article class="metric">
+          <span>Installs</span>
+          <strong id="kpiInstalls">-</strong>
+        </article>
+        <article class="metric">
+          <span>Registered</span>
+          <strong id="kpiRegistered">-</strong>
+        </article>
+        <article class="metric">
+          <span>Transacted</span>
+          <strong id="kpiTransacted">-</strong>
+        </article>
+        <article class="metric">
+          <span>Repeat &gt;30d</span>
+          <strong id="kpiRepeat">-</strong>
+        </article>
+      </section>
+
+      <section class="panel" id="scorecardPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Quality by Channel</h3>
+            <p>Aggregated metrics returned by the backend.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Users</th>
+                <th>Repeat</th>
+                <th>GMV/user</th>
+                <th>AOV</th>
+                <th>GM</th>
+                <th>NM</th>
+              </tr>
+            </thead>
+            <tbody id="scorecardBody">
+              <tr><td colspan="7">Connect an API endpoint, then refresh summary.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="conversionPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Conversion</h3>
+            <p>Funnel summary placeholder, ready for a conversion endpoint.</p>
+          </div>
+        </div>
+        <div class="placeholder" id="conversionBody">No conversion summary loaded.</div>
+      </section>
+
+      <section class="panel hidden" id="retentionPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Retention</h3>
+            <p>Cohort summary placeholder, ready for a retention endpoint.</p>
+          </div>
+        </div>
+        <div class="placeholder" id="retentionBody">No retention summary loaded.</div>
+      </section>
+
+      <section class="panel hidden" id="geoPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Geo</h3>
+            <p>Geo summary placeholder, ready for sampled coordinates.</p>
+          </div>
+        </div>
+        <div class="placeholder" id="geoBody">No geo summary loaded.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>

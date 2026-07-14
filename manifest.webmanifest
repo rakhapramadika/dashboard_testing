@@ -1,0 +1,18 @@
+{
+  "name": "Dashboard Testing",
+  "short_name": "Dashboard",
+  "description": "Installable PWA shell for BigQuery summary dashboards.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f3e9",
+  "theme_color": "#345c38",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
