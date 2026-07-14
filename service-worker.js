@@ -1,4 +1,4 @@
-const CACHE_NAME = "dashboard-testing-v1";
+const CACHE_NAME = "dashboard-testing-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -30,11 +30,14 @@ self.addEventListener("fetch", event => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      return cached || fetch(event.request).then(response => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-        return response;
+    fetch(event.request).then(response => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+      return response;
+    }).catch(() => {
+      return caches.match(event.request).then(cached => {
+        if (cached) return cached;
+        return caches.open(CACHE_NAME).then(cache => cache.match("./index.html"));
       });
     })
   );
