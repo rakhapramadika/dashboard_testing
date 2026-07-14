@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#345c38">
+  <title>Dashboard Testing</title>
+  <style>
+<?!= include('Styles'); ?>
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DT</div>
+        <div>
+          <h1>Dashboard Testing</h1>
+          <p>Secure Apps Script dashboard</p>
+        </div>
+      </div>
+
+      <section class="control-group">
+        <div class="control-title">Data Source</div>
+        <button id="refreshData" class="primary">Refresh summary</button>
+      </section>
+
+      <section class="control-group">
+        <div class="control-title">Install Date</div>
+        <div class="date-grid">
+          <label class="field">
+            <span>From</span>
+            <input id="dateFrom" type="date">
+          </label>
+          <label class="field">
+            <span>To</span>
+            <input id="dateTo" type="date">
+          </label>
+        </div>
+      </section>
+
+      <section class="control-group">
+        <div class="control-title">Channel</div>
+        <select id="channelFilter">
+          <option value="">All channels</option>
+        </select>
+      </section>
+
+      <div class="status" id="statusBox">Ready.</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <h2>User Quality</h2>
+          <p id="subtitle">Secure Allofresh dashboard powered by Apps Script and BigQuery summaries.</p>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button class="active" data-tab="scorecard">Scorecard</button>
+        <button data-tab="conversion">Conversion</button>
+        <button data-tab="retention">Retention</button>
+        <button data-tab="geo">Geo</button>
+      </nav>
+
+      <section class="kpi-grid" id="kpiGrid">
+        <article class="metric">
+          <span>Installs</span>
+          <strong id="kpiInstalls">-</strong>
+        </article>
+        <article class="metric">
+          <span>Registered</span>
+          <strong id="kpiRegistered">-</strong>
+        </article>
+        <article class="metric">
+          <span>Transacted</span>
+          <strong id="kpiTransacted">-</strong>
+        </article>
+        <article class="metric">
+          <span>Repeat &gt;30d</span>
+          <strong id="kpiRepeat">-</strong>
+        </article>
+      </section>
+
+      <section class="panel" id="scorecardPanel">
+        <div class="panel-header">
+          <div>
+            <h3 id="scorecardTitle">Quality by Channel</h3>
+            <p>Aggregated metrics returned by the backend.</p>
+          </div>
+          <div class="segmented">
+            <button class="active" data-scorecard-group="channel">Channel</button>
+            <button data-scorecard-group="adset">Adset</button>
+            <button data-scorecard-group="store">Store</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Users</th>
+                <th>Repeat</th>
+                <th>GMV/user</th>
+                <th>AOV</th>
+                <th>GM</th>
+                <th>NM</th>
+              </tr>
+            </thead>
+            <tbody id="scorecardBody">
+              <tr><td colspan="7">Refresh summary to load data.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="conversionPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Conversion</h3>
+            <p>Install, register, transaction, uninstall, and repeat summary by install channel.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Installs</th>
+                <th>Registered</th>
+                <th>Transacted</th>
+                <th>Register rate</th>
+                <th>Transaction rate</th>
+                <th>Repeat rate</th>
+                <th>Uninstalled</th>
+              </tr>
+            </thead>
+            <tbody id="conversionBody">
+              <tr><td colspan="8">No conversion summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="retentionPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Retention</h3>
+            <p>Cohort repeat summary by first transaction channel.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Cohort</th>
+                <th>Users</th>
+                <th>D1-30</th>
+                <th>D31-60</th>
+                <th>D61-90</th>
+                <th>D91+</th>
+              </tr>
+            </thead>
+            <tbody id="retentionBody">
+              <tr><td colspan="7">No retention summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="geoPanel">
+        <div class="panel-header">
+          <div>
+            <h3>Geo</h3>
+            <p>Store coverage and sampled buyer coordinates summary.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Users</th>
+                <th>With coords</th>
+                <th>Coverage</th>
+                <th>GMV</th>
+                <th>Lat</th>
+                <th>Lon</th>
+              </tr>
+            </thead>
+            <tbody id="geoBody">
+              <tr><td colspan="7">No geo summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+<?!= include('Client'); ?>
+  </script>
+</body>
+</html>
