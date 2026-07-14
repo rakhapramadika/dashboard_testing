@@ -4,12 +4,17 @@ const statusBox = document.querySelector("#statusBox");
 const installButton = document.querySelector("#installApp");
 let deferredInstallPrompt = null;
 
+function normalizeEndpoint(endpoint) {
+  return String(endpoint || "").replace("/a/macros/allofresh.id/s/", "/macros/s/");
+}
+
 const state = {
-  endpoint: localStorage.getItem("dashboard_api_endpoint") || DEFAULT_ENDPOINT,
+  endpoint: normalizeEndpoint(localStorage.getItem("dashboard_api_endpoint") || DEFAULT_ENDPOINT),
   activeTab: "scorecard",
 };
 
 endpointInput.value = state.endpoint;
+localStorage.setItem("dashboard_api_endpoint", state.endpoint);
 
 function setStatus(message) {
   statusBox.textContent = message;
@@ -165,7 +170,8 @@ function updateKpis(totals) {
 }
 
 document.querySelector("#saveEndpoint").addEventListener("click", () => {
-  state.endpoint = endpointInput.value.trim();
+  state.endpoint = normalizeEndpoint(endpointInput.value.trim());
+  endpointInput.value = state.endpoint;
   localStorage.setItem("dashboard_api_endpoint", state.endpoint);
   setStatus("Endpoint saved.");
 });
