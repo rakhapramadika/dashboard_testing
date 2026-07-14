@@ -216,6 +216,7 @@ select {
 .panel-header {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 16px;
   margin-bottom: 14px;
 }
@@ -227,6 +228,18 @@ select {
 
 .table-wrap {
   overflow: auto;
+}
+
+.segmented {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.segmented button {
+  min-height: 34px;
+  padding: 0 12px;
 }
 
 table {

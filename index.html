@@ -94,8 +94,13 @@
       <section class="panel" id="scorecardPanel">
         <div class="panel-header">
           <div>
-            <h3>Quality by Channel</h3>
+            <h3 id="scorecardTitle">Quality by Channel</h3>
             <p>Aggregated metrics returned by the backend.</p>
+          </div>
+          <div class="segmented">
+            <button class="active" data-scorecard-group="channel">Channel</button>
+            <button data-scorecard-group="adset">Adset</button>
+            <button data-scorecard-group="store">Store</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -122,30 +127,82 @@
         <div class="panel-header">
           <div>
             <h3>Conversion</h3>
-            <p>Funnel summary placeholder, ready for a conversion endpoint.</p>
+            <p>Install, register, transaction, uninstall, and repeat summary by install channel.</p>
           </div>
         </div>
-        <div class="placeholder" id="conversionBody">No conversion summary loaded.</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Installs</th>
+                <th>Registered</th>
+                <th>Transacted</th>
+                <th>Register rate</th>
+                <th>Transaction rate</th>
+                <th>Repeat rate</th>
+                <th>Uninstalled</th>
+              </tr>
+            </thead>
+            <tbody id="conversionBody">
+              <tr><td colspan="8">No conversion summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel hidden" id="retentionPanel">
         <div class="panel-header">
           <div>
             <h3>Retention</h3>
-            <p>Cohort summary placeholder, ready for a retention endpoint.</p>
+            <p>Cohort repeat summary by first transaction channel.</p>
           </div>
         </div>
-        <div class="placeholder" id="retentionBody">No retention summary loaded.</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>Cohort</th>
+                <th>Users</th>
+                <th>D1-30</th>
+                <th>D31-60</th>
+                <th>D61-90</th>
+                <th>D91+</th>
+              </tr>
+            </thead>
+            <tbody id="retentionBody">
+              <tr><td colspan="7">No retention summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel hidden" id="geoPanel">
         <div class="panel-header">
           <div>
             <h3>Geo</h3>
-            <p>Geo summary placeholder, ready for sampled coordinates.</p>
+            <p>Store coverage and sampled buyer coordinates summary.</p>
           </div>
         </div>
-        <div class="placeholder" id="geoBody">No geo summary loaded.</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Users</th>
+                <th>With coords</th>
+                <th>Coverage</th>
+                <th>GMV</th>
+                <th>Lat</th>
+                <th>Lon</th>
+              </tr>
+            </thead>
+            <tbody id="geoBody">
+              <tr><td colspan="7">No geo summary loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>

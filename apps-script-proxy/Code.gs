@@ -1,6 +1,6 @@
 const BQ_PROJECT_ID = 'tri-omnichannel-prd';
 const BQ_TABLE = 'tri-omnichannel-prd.claude.allofresh_users_quality_v2';
-const APP_VERSION = 'pwa-proxy-v2';
+const APP_VERSION = 'pwa-proxy-v3-tabs';
 const CACHE_TIMEZONE = 'Asia/Jakarta';
 const CACHE_ROLLOVER_HOUR = 9;
 const CACHE_SERVICE_SECONDS = 21600;
@@ -17,6 +17,12 @@ function doGet(e) {
       data = getDashboardMetadata();
     } else if (action === 'scorecard') {
       data = getScorecardSummary(payload.filters || {}, payload.group || 'channel', payload.minUsers || 50);
+    } else if (action === 'conversion') {
+      data = getConversionSummary(payload.filters || {});
+    } else if (action === 'retention') {
+      data = getRetentionSummary(payload.filters || {}, payload.group || 'channel', payload.adsetChannel || '');
+    } else if (action === 'geo') {
+      data = getGeoSummary(payload.filters || {}, payload.basis || '1st_trx_channel', payload.channels || [], payload.adsets || []);
     } else {
       throw new Error('Unknown action: ' + action);
     }
@@ -83,6 +89,188 @@ function getScorecardSummary(filters, group, minUsers) {
   });
 }
 
+function getConversionSummary(filters) {
+  const cacheParams = { filters: normalizedFilters_(filters) };
+  return dailyCached_('conversion', cacheParams, () => {
+    const sql = baseCte_() + `,
+      filtered AS (
+        SELECT *,
+          IF(register_date IS NOT NULL AND register_channel IS NOT NULL, TRUE, FALSE) AS is_reg,
+          IF(\`1st_transaction_date\` IS NOT NULL AND \`1st_trx_channel\` IS NOT NULL, TRUE, FALSE) AS is_trx,
+          LOWER(CAST(uninstall_flag AS STRING)) IN ('yes', 'true', '1') AS is_uninst,
+          DATE_DIFF((SELECT MAX(d) FROM (
+            SELECT MAX(install_date) d FROM base UNION ALL
+            SELECT MAX(register_date) d FROM base UNION ALL
+            SELECT MAX(\`1st_transaction_date\`) d FROM base UNION ALL
+            SELECT MAX(uninstall_date) d FROM base
+          )), \`1st_transaction_date\`, DAY) AS days_since_first_trx,
+          COALESCE(num_trx_d31_to_d60, 0) + COALESCE(num_trx_d61_to_d90, 0) + COALESCE(\`num_trx_d91+\`, 0) AS after30
+        FROM base
+        WHERE ${filterWhere_(filters)}
+      ),
+      by_channel AS (
+        SELECT
+          install_channel AS channel,
+          COUNT(*) installs,
+          SUM(IF(is_reg, 1, 0)) registered,
+          SUM(IF(is_trx, 1, 0)) transacted,
+          SUM(IF(is_uninst, 1, 0)) uninstalled,
+          SUM(IF(days_since_first_trx >= 60 AND after30 >= 1, 1, 0)) repeat30,
+          SUM(IF(days_since_first_trx >= 60, 1, 0)) mature30
+        FROM filtered
+        GROUP BY install_channel
+      )
+      SELECT
+        channel,
+        installs,
+        registered,
+        transacted,
+        uninstalled,
+        repeat30,
+        mature30,
+        SAFE_DIVIDE(registered, NULLIF(installs, 0)) AS registerRate,
+        SAFE_DIVIDE(transacted, NULLIF(installs, 0)) AS transactionRate,
+        SAFE_DIVIDE(repeat30, NULLIF(mature30, 0)) AS repeatRate
+      FROM by_channel
+      WHERE channel IS NOT NULL AND channel != ''
+      ORDER BY installs DESC
+    `;
+    return runQuery_(sql);
+  });
+}
+
+function getRetentionSummary(filters, groupBy, adsetChannel) {
+  const cacheParams = {
+    filters: normalizedFilters_(filters),
+    groupBy: groupBy || 'channel',
+    adsetChannel: adsetChannel || '',
+  };
+  return dailyCached_('retention', cacheParams, () => {
+    const groupExpr = retentionGroupExpr_(groupBy);
+    const adsetFilter = adsetChannel ? "AND `1st_trx_channel` = '" + escapeSql_(adsetChannel) + "'" : '';
+    const sql = baseCte_() + `,
+      filtered AS (
+        SELECT *,
+          DATE_DIFF((SELECT MAX(d) FROM (
+            SELECT MAX(install_date) d FROM base UNION ALL
+            SELECT MAX(register_date) d FROM base UNION ALL
+            SELECT MAX(\`1st_transaction_date\`) d FROM base UNION ALL
+            SELECT MAX(uninstall_date) d FROM base
+          )), \`1st_transaction_date\`, DAY) AS days_since_first_trx
+        FROM base
+        WHERE ${filterWhere_(filters)}
+          AND \`1st_transaction_date\` IS NOT NULL
+          ${adsetFilter}
+      )
+      SELECT
+        ${groupExpr} AS groupKey,
+        SUBSTR(CAST(\`1st_transaction_date\` AS STRING), 1, 7) AS cohortMonth,
+        COUNT(*) AS n,
+        SUM(IF(COALESCE(num_trx_d30, 0) >= 1, 1, 0)) AS d30,
+        SUM(IF(days_since_first_trx >= 60, 1, 0)) AS m60,
+        SUM(IF(days_since_first_trx >= 60 AND COALESCE(num_trx_d31_to_d60, 0) >= 1, 1, 0)) AS r60,
+        SUM(IF(days_since_first_trx >= 90, 1, 0)) AS m90,
+        SUM(IF(days_since_first_trx >= 90 AND COALESCE(num_trx_d61_to_d90, 0) >= 1, 1, 0)) AS r90,
+        SUM(IF(days_since_first_trx >= 91, 1, 0)) AS m91,
+        SUM(IF(days_since_first_trx >= 91 AND COALESCE(\`num_trx_d91+\`, 0) >= 1, 1, 0)) AS r91
+      FROM filtered
+      WHERE ${groupExpr} IS NOT NULL AND ${groupExpr} != ''
+      GROUP BY groupKey, cohortMonth
+      ORDER BY groupKey, cohortMonth
+    `;
+    return runQuery_(sql);
+  });
+}
+
+function getGeoSummary(filters, basis, selectedChannels, selectedAdsets) {
+  const cacheParams = {
+    filters: normalizedFilters_(filters),
+    basis: basis || '1st_trx_channel',
+    channels: normalizedList_(selectedChannels),
+    adsets: normalizedList_(selectedAdsets),
+  };
+  return dailyCached_('geo', cacheParams, () => {
+    const basisCol = geoBasisColumn_(basis);
+    const channelWhere = selectedChannels && selectedChannels.length
+      ? `${basisCol} IN (${sqlStringList_(selectedChannels)})`
+      : 'TRUE';
+    const adsetWhere = selectedAdsets && selectedAdsets.length
+      ? `\`1st_trx_adset\` IN (${sqlStringList_(selectedAdsets)})`
+      : 'TRUE';
+    const sql = baseCte_() + `,
+      filtered AS (
+        SELECT *,
+          CASE
+            WHEN \`1st_transaction_date\` IS NOT NULL THEN 'transacted'
+            WHEN register_date IS NOT NULL THEN 'register_only'
+            ELSE 'install_only'
+          END AS funnelStage
+        FROM base
+        WHERE ${filterWhere_(filters)}
+      ),
+      point_sample AS (
+        SELECT
+          'point' AS rowType,
+          CAST(latitude AS FLOAT64) AS latitude,
+          CAST(longitude AS FLOAT64) AS longitude,
+          CAST(${basisCol} AS STRING) AS channel,
+          store,
+          CAST(gmv AS FLOAT64) AS gmv,
+          CAST(NULL AS INT64) users,
+          CAST(NULL AS INT64) withCoords,
+          CAST(NULL AS FLOAT64) totalGmv,
+          CAST(NULL AS STRING) byStage,
+          CAST(NULL AS STRING) byChannel,
+          CAST(NULL AS FLOAT64) store_latitude,
+          CAST(NULL AS FLOAT64) store_longitude,
+          CAST(NULL AS FLOAT64) store_radius
+        FROM filtered
+        WHERE ${channelWhere}
+          AND ${adsetWhere}
+          AND latitude IS NOT NULL
+          AND longitude IS NOT NULL
+          AND \`1st_transaction_date\` IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (ORDER BY FARM_FINGERPRINT(CAST(device_id AS STRING))) <= 1000
+      ),
+      store_totals AS (
+        SELECT
+          store,
+          COUNT(*) users,
+          SUM(IF(latitude IS NOT NULL AND longitude IS NOT NULL, 1, 0)) withCoords,
+          CAST(SUM(gmv) AS FLOAT64) totalGmv,
+          CAST(ANY_VALUE(store_latitude) AS FLOAT64) store_latitude,
+          CAST(ANY_VALUE(store_longitude) AS FLOAT64) store_longitude,
+          CAST(ANY_VALUE(store_radius) AS FLOAT64) store_radius
+        FROM filtered
+        WHERE store IS NOT NULL
+        GROUP BY store
+      ),
+      store_layer AS (
+        SELECT
+          'store' AS rowType,
+          CAST(NULL AS FLOAT64) latitude,
+          CAST(NULL AS FLOAT64) longitude,
+          CAST(NULL AS STRING) channel,
+          store,
+          CAST(NULL AS FLOAT64) gmv,
+          users,
+          withCoords,
+          totalGmv,
+          CAST(NULL AS STRING) byStage,
+          CAST(NULL AS STRING) byChannel,
+          store_latitude,
+          store_longitude,
+          store_radius
+        FROM store_totals
+      )
+      SELECT * FROM point_sample
+      UNION ALL
+      SELECT * FROM store_layer
+    `;
+    return runQuery_(sql);
+  });
+}
+
 function getBaseSql_() {
   const cols = getSchemaColumns_();
 
@@ -117,17 +305,38 @@ function getBaseSql_() {
     dateTickAlias('first_transaction_date', '1st_transaction_date') + ',',
     stringAlias('first_trx_channel', '1st_trx_channel') + ',',
     stringAlias('first_trx_adset', '1st_trx_adset') + ',',
+    dateAlias('uninstall_date', 'uninstall_date') + ',',
+    col('uninstall_flag') + ',',
     stringCol('store') + ',',
+    col('latitude') + ',',
+    col('longitude') + ',',
+    col('store_latitude') + ',',
+    col('store_longitude') + ',',
+    col('store_radius') + ',',
     optionalNumber('num_trx_d30') + ',',
     optionalNumber('num_trx_d31_to_d60') + ',',
     optionalNumber('num_trx_d61_to_d90') + ',',
     alias('num_trx_d90', 'num_trx_d91+') + ',',
+    optionalNumber('gmv_d30') + ',',
+    optionalNumber('gmv_d31_to_d60') + ',',
+    optionalNumber('gmv_d61_to_d90') + ',',
+    alias('gmv_d90', 'gmv_d90+') + ',',
     optionalNumber('gmv') + ',',
     optionalNumber('aov') + ',',
     optionalNumber('gm') + ',',
     optionalNumber('nm') + ',',
     optionalNumber('unique_category') + ',',
     optionalNumber('unique_sku') + ',',
+    optionalNumber('gmv_sembako') + ',',
+    optionalNumber('gmv_fruits_vege') + ',',
+    optionalNumber('gmv_butchery') + ',',
+    optionalNumber('gmv_fishery') + ',',
+    optionalNumber('gmv_beverage') + ',',
+    optionalNumber('gmv_cleaning') + ',',
+    optionalNumber('gmv_cosmetics') + ',',
+    optionalNumber('gmv_other_dry_grocery') + ',',
+    optionalNumber('gmv_self_service_perishable') + ',',
+    optionalNumber('gmv_others') + ',',
     numericAliasFrom('gross_margin_sum', ['gross_margin_sum', 'gross_margin']) + ',',
     numericAliasFrom('gross_revenue_sum', ['gross_revenue_sum', 'gross_revenue']) + ',',
     numericAliasFrom('gross_profit_sum', ['gross_profit_sum', 'gross_profit']) + ',',
@@ -182,6 +391,18 @@ function filterWhere_(filters) {
 function scorecardGroupExpr_(group) {
   if (group === 'adset') return '`1st_trx_adset`';
   if (group === 'store') return 'store';
+  return '`1st_trx_channel`';
+}
+
+function retentionGroupExpr_(groupBy) {
+  if (groupBy === 'device') return 'device_type';
+  if (groupBy === 'adset') return '`1st_trx_adset`';
+  return '`1st_trx_channel`';
+}
+
+function geoBasisColumn_(basis) {
+  if (basis === 'install_channel') return 'install_channel';
+  if (basis === 'register_channel') return 'register_channel';
   return '`1st_trx_channel`';
 }
 

@@ -11,6 +11,7 @@ function normalizeEndpoint(endpoint) {
 const state = {
   endpoint: normalizeEndpoint(localStorage.getItem("dashboard_api_endpoint") || DEFAULT_ENDPOINT),
   activeTab: "scorecard",
+  scorecardGroup: "channel",
 };
 
 endpointInput.value = state.endpoint;
@@ -36,6 +37,12 @@ function formatIDR(value) {
   if (n >= 1e6) return `Rp ${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `Rp ${(n / 1e3).toFixed(0)}K`;
   return `Rp ${Math.round(n).toLocaleString()}`;
+}
+
+function formatRate(numerator, denominator) {
+  const den = Number(denominator || 0);
+  if (!den) return "-";
+  return formatPct(Number(numerator || 0) / den);
 }
 
 async function apiCall(action, payload = {}) {
@@ -97,13 +104,26 @@ async function refreshSummary() {
   setStatus("Loading summary...");
   try {
     const filters = currentFilters();
-    const [meta, scorecard] = await Promise.all([
+    const [meta, scorecard, conversion, retention, geo] = await Promise.allSettled([
       apiCall("metadata"),
-      apiCall("scorecard", { filters, group: "channel", minUsers: 50 }),
+      apiCall("scorecard", { filters, group: state.scorecardGroup, minUsers: 50 }),
+      apiCall("conversion", { filters }),
+      apiCall("retention", { filters, group: "channel" }),
+      apiCall("geo", { filters, basis: "1st_trx_channel" }),
     ]);
-    hydrateFilters(meta);
-    renderScorecard(scorecard);
-    setStatus("Summary loaded.");
+
+    if (meta.status === "fulfilled") hydrateFilters(meta.value);
+    if (scorecard.status === "fulfilled") renderScorecard(scorecard.value);
+    else renderScorecardError(scorecard.reason);
+    if (conversion.status === "fulfilled") renderConversion(conversion.value);
+    else renderTableError("#conversionBody", 8, conversion.reason);
+    if (retention.status === "fulfilled") renderRetention(retention.value);
+    else renderTableError("#retentionBody", 7, retention.reason);
+    if (geo.status === "fulfilled") renderGeo(geo.value);
+    else renderTableError("#geoBody", 7, geo.reason);
+
+    const failures = [meta, scorecard, conversion, retention, geo].filter(result => result.status === "rejected").length;
+    setStatus(failures ? `Summary loaded with ${failures} tab error(s).` : "Summary loaded.");
   } catch (error) {
     setStatus(error.message || String(error));
   }
@@ -134,6 +154,8 @@ function hydrateFilters(meta = {}) {
 
 function renderScorecard(rows = []) {
   const body = document.querySelector("#scorecardBody");
+  const label = state.scorecardGroup === "adset" ? "Adset" : state.scorecardGroup === "store" ? "Store" : "Channel";
+  document.querySelector("#scorecardTitle").textContent = `Quality by ${label}`;
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="7">No scorecard rows returned.</td></tr>`;
     updateKpis({});
@@ -162,6 +184,83 @@ function renderScorecard(rows = []) {
   updateKpis(totals);
 }
 
+function renderScorecardError(error) {
+  document.querySelector("#scorecardBody").innerHTML =
+    `<tr><td colspan="7">${errorMessage(error)}</td></tr>`;
+  updateKpis({});
+}
+
+function renderTableError(selector, columns, error) {
+  document.querySelector(selector).innerHTML =
+    `<tr><td colspan="${columns}">${errorMessage(error)}</td></tr>`;
+}
+
+function errorMessage(error) {
+  return String(error && error.message ? error.message : error || "Could not load data.");
+}
+
+function renderConversion(rows = []) {
+  const body = document.querySelector("#conversionBody");
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="8">No conversion rows returned.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(row => `
+    <tr>
+      <td>${row.channel || "-"}</td>
+      <td>${formatNumber(row.installs)}</td>
+      <td>${formatNumber(row.registered)}</td>
+      <td>${formatNumber(row.transacted)}</td>
+      <td>${formatPct(row.registerRate)}</td>
+      <td>${formatPct(row.transactionRate)}</td>
+      <td>${formatPct(row.repeatRate)}</td>
+      <td>${formatNumber(row.uninstalled)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderRetention(rows = []) {
+  const body = document.querySelector("#retentionBody");
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7">No retention rows returned.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(row => `
+    <tr>
+      <td>${row.groupKey || "-"}</td>
+      <td>${row.cohortMonth || "-"}</td>
+      <td>${formatNumber(row.n)}</td>
+      <td>${formatRate(row.d30, row.n)}</td>
+      <td>${formatRate(row.r60, row.m60)}</td>
+      <td>${formatRate(row.r90, row.m90)}</td>
+      <td>${formatRate(row.r91, row.m91)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderGeo(rows = []) {
+  const body = document.querySelector("#geoBody");
+  const stores = rows.filter(row => row.rowType === "store");
+  if (!stores.length) {
+    body.innerHTML = `<tr><td colspan="7">No geo rows returned.</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = stores.map(row => `
+    <tr>
+      <td>${row.store || "-"}</td>
+      <td>${formatNumber(row.users)}</td>
+      <td>${formatNumber(row.withCoords)}</td>
+      <td>${formatRate(row.withCoords, row.users)}</td>
+      <td>${formatIDR(row.totalGmv)}</td>
+      <td>${row.store_latitude || "-"}</td>
+      <td>${row.store_longitude || "-"}</td>
+    </tr>
+  `).join("");
+}
+
 function updateKpis(totals) {
   document.querySelector("#kpiInstalls").textContent = formatNumber(totals.users);
   document.querySelector("#kpiRegistered").textContent = formatNumber(totals.registered);
@@ -177,6 +276,21 @@ document.querySelector("#saveEndpoint").addEventListener("click", () => {
 });
 
 document.querySelector("#refreshData").addEventListener("click", refreshSummary);
+
+document.querySelectorAll("[data-scorecard-group]").forEach(button => {
+  button.addEventListener("click", async () => {
+    state.scorecardGroup = button.dataset.scorecardGroup;
+    document.querySelectorAll("[data-scorecard-group]").forEach(item => item.classList.toggle("active", item === button));
+    setStatus(`Loading ${state.scorecardGroup} scorecard...`);
+    try {
+      const rows = await apiCall("scorecard", { filters: currentFilters(), group: state.scorecardGroup, minUsers: 50 });
+      renderScorecard(rows);
+      setStatus("Scorecard loaded.");
+    } catch (error) {
+      setStatus(error.message || String(error));
+    }
+  });
+});
 
 document.querySelectorAll(".tabs button").forEach(button => {
   button.addEventListener("click", () => {
