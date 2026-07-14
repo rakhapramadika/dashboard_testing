@@ -3,6 +3,7 @@ const BQ_TABLE = 'tri-omnichannel-prd.claude.allofresh_users_quality_v2';
 const APP_VERSION = 'pwa-proxy-v1';
 
 function doGet(e) {
+  const callback = e.parameter.callback || '';
   try {
     const action = (e.parameter.action || '').trim();
     const payload = parsePayload_(e.parameter.payload);
@@ -16,9 +17,9 @@ function doGet(e) {
       throw new Error('Unknown action: ' + action);
     }
 
-    return json_(data);
+    return json_(data, callback);
   } catch (err) {
-    return json_({ error: String(err && err.message ? err.message : err) }, 500);
+    return json_({ error: String(err && err.message ? err.message : err) }, callback);
   }
 }
 
@@ -225,12 +226,19 @@ function parsePayload_(payload) {
   }
 }
 
-function json_(data, statusCode) {
-  const output = ContentService
+function json_(data, callback) {
+  if (callback) {
+    if (!/^[A-Za-z_$][0-9A-Za-z_$]*(\.[A-Za-z_$][0-9A-Za-z_$]*)*$/.test(callback)) {
+      throw new Error('Invalid JSONP callback.');
+    }
+    return ContentService
+      .createTextOutput(callback + '(' + JSON.stringify(data) + ');')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return ContentService
     .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
-  // Apps Script ContentService cannot set HTTP status codes or CORS headers.
-  return output;
 }
 
 function firstRow_(rows) {

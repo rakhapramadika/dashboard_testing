@@ -38,6 +38,10 @@ async function apiCall(action, payload = {}) {
     throw new Error("Set an API endpoint first.");
   }
 
+  if (state.endpoint.includes("script.google.com")) {
+    return jsonpCall(action, payload);
+  }
+
   const url = new URL(state.endpoint);
   url.searchParams.set("action", action);
   url.searchParams.set("payload", JSON.stringify(payload));
@@ -46,6 +50,42 @@ async function apiCall(action, payload = {}) {
     throw new Error(`API ${response.status}: ${await response.text()}`);
   }
   return response.json();
+}
+
+function jsonpCall(action, payload = {}) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `dashboardJsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const url = new URL(state.endpoint);
+    url.searchParams.set("action", action);
+    url.searchParams.set("payload", JSON.stringify(payload));
+    url.searchParams.set("callback", callbackName);
+
+    const script = document.createElement("script");
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Apps Script request timed out."));
+    }, 120000);
+
+    function cleanup() {
+      window.clearTimeout(timer);
+      delete window[callbackName];
+      script.remove();
+    }
+
+    window[callbackName] = data => {
+      cleanup();
+      if (data && data.error) reject(new Error(data.error));
+      else resolve(data);
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Apps Script request failed."));
+    };
+
+    script.src = url.toString();
+    document.body.appendChild(script);
+  });
 }
 
 async function refreshSummary() {
