@@ -1,4 +1,4 @@
-const DEFAULT_ENDPOINT = "https://script.google.com/a/macros/allofresh.id/s/AKfycbw6aaSke78nstNJdeJ1sGOrvBxlUiKxh03EIlMIPsFnJBpywKw5fZEYrzEa0_jxy4k1/exec";
+const DEFAULT_ENDPOINT = "https://script.google.com/macros/s/AKfycbw6aaSke78nstNJdeJ1sGOrvBxlUiKxh03EIlMIPsFnJBpywKw5fZEYrzEa0_jxy4k1/exec";
 const endpointInput = document.querySelector("#apiEndpoint");
 const statusBox = document.querySelector("#statusBox");
 const installButton = document.querySelector("#installApp");
