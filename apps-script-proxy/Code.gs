@@ -1,6 +1,10 @@
 const BQ_PROJECT_ID = 'tri-omnichannel-prd';
 const BQ_TABLE = 'tri-omnichannel-prd.claude.allofresh_users_quality_v2';
-const APP_VERSION = 'pwa-proxy-v1';
+const APP_VERSION = 'pwa-proxy-v2';
+const CACHE_TIMEZONE = 'Asia/Jakarta';
+const CACHE_ROLLOVER_HOUR = 9;
+const CACHE_SERVICE_SECONDS = 21600;
+const CACHE_PROPERTY_CHUNK_SIZE = 8000;
 
 function doGet(e) {
   const callback = e.parameter.callback || '';
@@ -24,57 +28,63 @@ function doGet(e) {
 }
 
 function getDashboardMetadata() {
-  const sql = baseCte_() + `
-    SELECT
-      MIN(install_date) AS dateFrom,
-      MAX(install_date) AS dateTo,
-      STRING_AGG(DISTINCT CAST(device_type AS STRING), '||' ORDER BY CAST(device_type AS STRING)) AS deviceTypes,
-      STRING_AGG(DISTINCT CAST(install_channel AS STRING), '||' ORDER BY CAST(install_channel AS STRING)) AS installChannels,
-      STRING_AGG(DISTINCT CAST(store AS STRING), '||' ORDER BY CAST(store AS STRING)) AS stores,
-      STRING_AGG(DISTINCT SUBSTR(CAST(\`1st_transaction_date\` AS STRING), 1, 7), '||' ORDER BY SUBSTR(CAST(\`1st_transaction_date\` AS STRING), 1, 7)) AS trxMonths,
-      '${APP_VERSION}' AS backendVersion
-    FROM base
-    WHERE device_id IS NOT NULL
-      AND install_channel IS NOT NULL
-      AND install_date IS NOT NULL
-  `;
-  return firstRow_(runQuery_(sql)) || {};
+  return dailyCached_('metadata', {}, () => {
+    const sql = baseCte_() + `
+      SELECT
+        MIN(install_date) AS dateFrom,
+        MAX(install_date) AS dateTo,
+        STRING_AGG(DISTINCT CAST(device_type AS STRING), '||' ORDER BY CAST(device_type AS STRING)) AS deviceTypes,
+        STRING_AGG(DISTINCT CAST(install_channel AS STRING), '||' ORDER BY CAST(install_channel AS STRING)) AS installChannels,
+        STRING_AGG(DISTINCT CAST(store AS STRING), '||' ORDER BY CAST(store AS STRING)) AS stores,
+        STRING_AGG(DISTINCT SUBSTR(CAST(\`1st_transaction_date\` AS STRING), 1, 7), '||' ORDER BY SUBSTR(CAST(\`1st_transaction_date\` AS STRING), 1, 7)) AS trxMonths,
+        '${APP_VERSION}' AS backendVersion
+      FROM base
+      WHERE device_id IS NOT NULL
+        AND install_channel IS NOT NULL
+        AND install_date IS NOT NULL
+    `;
+    return firstRow_(runQuery_(sql)) || {};
+  });
 }
 
 function getScorecardSummary(filters, group, minUsers) {
-  const groupExpr = scorecardGroupExpr_(group);
-  const minN = Math.max(0, Number(minUsers || 50));
-  const source = scoredBase_(filterWhere_(filters));
-  const sql = baseCte_() + `
-    SELECT
-      ${groupExpr} AS groupKey,
-      COUNT(*) AS users,
-      SUM(IF(total_trx > 1 AND days_since_first_trx >= 60, 1, 0)) AS repeatCount,
-      SUM(IF(days_since_first_trx >= 60, 1, 0)) AS matured,
-      SAFE_DIVIDE(SUM(total_trx), COUNT(*)) AS trxPerUser,
-      SAFE_DIVIDE(SUM(gmv), COUNT(*)) AS gmvPerUser,
-      SAFE_DIVIDE(SUM(gmv), NULLIF(SUM(total_trx), 0)) AS aov,
-      SAFE_DIVIDE(SUM(gross_margin_sum), NULLIF(SUM(gross_revenue_sum), 0)) AS gm,
-      SAFE_DIVIDE(SUM(gross_profit_sum), NULLIF(SUM(net_revenue_sum), 0)) AS nm,
-      SAFE_DIVIDE(SUM(unique_sku), COUNT(*)) AS sku,
-      SAFE_DIVIDE(SUM(unique_category), COUNT(*)) AS cat,
-      SUM(gmv) AS gmv
-    FROM ${source}
-    WHERE \`1st_transaction_date\` IS NOT NULL
-      AND ${groupExpr} IS NOT NULL
-      AND ${groupExpr} != ''
-    GROUP BY groupKey
-    HAVING users >= ${minN}
-    ORDER BY gmvPerUser DESC
-  `;
-  return runQuery_(sql);
+  const cacheParams = {
+    filters: normalizedFilters_(filters),
+    group: group || 'channel',
+    minUsers: Math.max(0, Number(minUsers || 50)),
+  };
+  return dailyCached_('scorecard', cacheParams, () => {
+    const groupExpr = scorecardGroupExpr_(group);
+    const minN = cacheParams.minUsers;
+    const source = scoredBase_(filterWhere_(filters));
+    const sql = baseCte_() + `
+      SELECT
+        ${groupExpr} AS groupKey,
+        COUNT(*) AS users,
+        SUM(IF(total_trx > 1 AND days_since_first_trx >= 60, 1, 0)) AS repeatCount,
+        SUM(IF(days_since_first_trx >= 60, 1, 0)) AS matured,
+        SAFE_DIVIDE(SUM(total_trx), COUNT(*)) AS trxPerUser,
+        SAFE_DIVIDE(SUM(gmv), COUNT(*)) AS gmvPerUser,
+        SAFE_DIVIDE(SUM(gmv), NULLIF(SUM(total_trx), 0)) AS aov,
+        SAFE_DIVIDE(SUM(gross_margin_sum), NULLIF(SUM(gross_revenue_sum), 0)) AS gm,
+        SAFE_DIVIDE(SUM(gross_profit_sum), NULLIF(SUM(net_revenue_sum), 0)) AS nm,
+        SAFE_DIVIDE(SUM(unique_sku), COUNT(*)) AS sku,
+        SAFE_DIVIDE(SUM(unique_category), COUNT(*)) AS cat,
+        SUM(gmv) AS gmv
+      FROM ${source}
+      WHERE \`1st_transaction_date\` IS NOT NULL
+        AND ${groupExpr} IS NOT NULL
+        AND ${groupExpr} != ''
+      GROUP BY groupKey
+      HAVING users >= ${minN}
+      ORDER BY gmvPerUser DESC
+    `;
+    return runQuery_(sql);
+  });
 }
 
 function getBaseSql_() {
-  const table = parseTableId_(BQ_TABLE);
-  const schema = BigQuery.Tables.get(table.projectId, table.datasetId, table.tableId).schema.fields || [];
-  const cols = {};
-  schema.forEach(field => { cols[field.name] = field.type || true; });
+  const cols = getSchemaColumns_();
 
   const col = name => cols[name] ? name : `NULL AS ${name}`;
   const stringCol = name => cols[name] ? `CAST(${name} AS STRING) AS ${name}` : `NULL AS ${name}`;
@@ -124,6 +134,16 @@ function getBaseSql_() {
     numericAliasFrom('net_revenue_sum', ['net_revenue_sum', 'net_revenue_before_voucher_rebate', 'net_revenue_before_voucher', 'net_revenue']),
     'FROM `' + BQ_TABLE + '`',
   ].join(' ');
+}
+
+function getSchemaColumns_() {
+  return dailyCached_('schema', { table: BQ_TABLE }, () => {
+    const table = parseTableId_(BQ_TABLE);
+    const schema = BigQuery.Tables.get(table.projectId, table.datasetId, table.tableId).schema.fields || [];
+    const cols = {};
+    schema.forEach(field => { cols[field.name] = field.type || true; });
+    return cols;
+  });
 }
 
 function baseCte_() {
@@ -243,6 +263,134 @@ function json_(data, callback) {
 
 function firstRow_(rows) {
   return rows && rows.length ? rows[0] : null;
+}
+
+function dailyCached_(name, params, producer) {
+  const key = cacheKey_(name, params);
+  const scriptCache = CacheService.getScriptCache();
+  const cached = parseCachePayload_(scriptCache.get(key));
+  if (cached.hit) return cached.data;
+
+  const persisted = getPersistentCache_(key);
+  if (persisted.hit) {
+    putScriptCache_(scriptCache, key, persisted.data);
+    return persisted.data;
+  }
+
+  const data = producer();
+  const payload = { expiresAt: Date.now() + 30 * 60 * 60 * 1000, data };
+  const json = JSON.stringify(payload);
+  putScriptCache_(scriptCache, key, data);
+  putPersistentCache_(key, json);
+  return data;
+}
+
+function putScriptCache_(scriptCache, key, data) {
+  try {
+    scriptCache.put(key, JSON.stringify({ data }), CACHE_SERVICE_SECONDS);
+  } catch (err) {
+    // CacheService has a small value limit. Persistent chunked cache can still handle this.
+  }
+}
+
+function cacheKey_(name, params) {
+  const raw = [
+    APP_VERSION,
+    dailyCacheBucket_(),
+    name,
+    stableStringify_(params || {}),
+  ].join('|');
+  return 'dt_' + hash_(raw);
+}
+
+function dailyCacheBucket_() {
+  const shifted = new Date(Date.now() - CACHE_ROLLOVER_HOUR * 60 * 60 * 1000);
+  return Utilities.formatDate(shifted, CACHE_TIMEZONE, 'yyyyMMdd');
+}
+
+function parseCachePayload_(value) {
+  if (!value) return { hit: false };
+  try {
+    const parsed = JSON.parse(value);
+    return { hit: true, data: parsed.data };
+  } catch (err) {
+    return { hit: false };
+  }
+}
+
+function getPersistentCache_(key) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const indexRaw = props.getProperty(key + '_index');
+    if (!indexRaw) return { hit: false };
+
+    const index = JSON.parse(indexRaw);
+    if (!index || Number(index.expiresAt || 0) <= Date.now()) return { hit: false };
+
+    const chunks = [];
+    for (let i = 0; i < Number(index.chunks || 0); i++) {
+      const chunk = props.getProperty(key + '_' + i);
+      if (chunk === null) return { hit: false };
+      chunks.push(chunk);
+    }
+
+    const payload = JSON.parse(chunks.join(''));
+    if (Number(payload.expiresAt || 0) <= Date.now()) return { hit: false };
+    return { hit: true, data: payload.data };
+  } catch (err) {
+    return { hit: false };
+  }
+}
+
+function putPersistentCache_(key, json) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const oldIndexRaw = props.getProperty(key + '_index');
+    if (oldIndexRaw) {
+      const oldIndex = JSON.parse(oldIndexRaw);
+      const deleteKeys = [key + '_index'];
+      for (let i = 0; i < Number(oldIndex.chunks || 0); i++) deleteKeys.push(key + '_' + i);
+      deleteKeys.forEach(deleteKey => props.deleteProperty(deleteKey));
+    }
+
+    const values = {};
+    const chunks = Math.ceil(json.length / CACHE_PROPERTY_CHUNK_SIZE);
+    for (let i = 0; i < chunks; i++) {
+      values[key + '_' + i] = json.slice(i * CACHE_PROPERTY_CHUNK_SIZE, (i + 1) * CACHE_PROPERTY_CHUNK_SIZE);
+    }
+    values[key + '_index'] = JSON.stringify({ expiresAt: Date.now() + 30 * 60 * 60 * 1000, chunks });
+    props.setProperties(values);
+  } catch (err) {
+    // Cache writes are best effort; BigQuery results should still be returned.
+  }
+}
+
+function stableStringify_(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStringify_).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stableStringify_(value[key])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
+function normalizedFilters_(filters) {
+  filters = filters || {};
+  return {
+    dateFrom: filters.dateFrom || '',
+    dateTo: filters.dateTo || '',
+    deviceTypes: normalizedList_(filters.deviceTypes),
+    installChannels: normalizedList_(filters.installChannels),
+    stores: normalizedList_(filters.stores),
+  };
+}
+
+function normalizedList_(values) {
+  return (values || []).map(String).filter(Boolean).sort();
+}
+
+function hash_(value) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value);
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, '').slice(0, 40);
 }
 
 function sqlStringList_(values) {
